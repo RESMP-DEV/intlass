@@ -4,6 +4,9 @@
 
 ### Added
 
+- Added deterministic SM86-gated `matmul_int4_bf16_tn` correctness tests
+  against pure-Python packed signed INT4 inputs and explicit-scale BF16
+  PyTorch references.
 - Added deterministic SM86-gated `matmul_int8_bf16_tn` correctness tests
   against explicit-scale BF16 PyTorch references.
 - Added an SM86-only INT8 benchmark that reports the BF16 PyTorch baseline and
