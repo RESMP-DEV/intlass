@@ -54,9 +54,7 @@ cc = detect_cc()
 def get_cuda_arch_flags():
     flags = [
         "-gencode",
-        "arch=compute_120a,code=sm_120a",
-        "-gencode",
-        "arch=compute_100a,code=sm_100a",
+        "arch=compute_86,code=sm_86",
         "--expt-relaxed-constexpr",
         "--use_fast_math",
         "-std=c++17",
@@ -92,8 +90,8 @@ if __name__ == "__main__":
     device = torch.cuda.current_device()
     print(f"Current device: {torch.cuda.get_device_name(device)}")
     print(f"Current CUDA capability: {torch.cuda.get_device_capability(device)}")
-    assert torch.cuda.get_device_capability(device)[0] >= 10, (
-        f"CUDA capability must be >= 10.0, yours is {torch.cuda.get_device_capability(device)}"
+    assert torch.cuda.get_device_capability(device) == (8, 6), (
+        f"CUDA capability must be SM86 / (8, 6), yours is {torch.cuda.get_device_capability(device)}"
     )
 
     print(f"PyTorch version: {torch_version}")
@@ -123,10 +121,10 @@ if __name__ == "__main__":
                     "qutlass/csrc/fused_quantize_mx.cu",
                     "qutlass/csrc/fused_quantize_mx_mask.cu",
                     "qutlass/csrc/fused_quantize_nv.cu",
-                    "qutlass/csrc/fused_quantize_mx_sm100.cu",
-                    "qutlass/csrc/fused_quantize_nv_sm100.cu",
-                    "qutlass/csrc/quartet_bwd_sm120.cu",
+                    "qutlass/csrc/int4_pack.cu",
                     "qutlass/csrc/int8_quantize.cu",
+                    "qutlass/csrc/gemm_int4_sm86.cu",
+                    "qutlass/csrc/gemm_int8_sm86.cu",
                 ],
                 include_dirs=[
                     os.path.join(setup_dir, "qutlass/csrc/include"),
