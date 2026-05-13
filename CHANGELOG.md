@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added deterministic signed INT4 pack/unpack tests, including an SM86-gated
+  CUDA extension comparison for `qutlass._CUDA.pack_int4`.
 - Added deterministic SM86-gated `matmul_int4_bf16_tn` correctness tests
   against pure-Python packed signed INT4 inputs and explicit-scale BF16
   PyTorch references.
