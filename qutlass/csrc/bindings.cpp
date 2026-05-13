@@ -32,8 +32,136 @@
 #include "include/fused_quantize_host.h"
 #include "include/backward_host.h"
 #include "include/int8_quantize.h"
+#if defined(__has_include)
+#if __has_include("include/int_kernels.h")
+#include "include/int_kernels.h"
+#define QUTLASS_HAS_INT_KERNELS 1
+#endif
+#endif
+
+#ifndef QUTLASS_HAS_INT_KERNELS
+#define QUTLASS_HAS_INT_KERNELS 0
+#endif
 
 namespace QUTLASS {
+
+namespace {
+
+bool is_integer_tensor_type(at::ScalarType dtype) {
+    return dtype == at::kByte || dtype == at::kChar ||
+           dtype == at::kShort || dtype == at::kInt ||
+           dtype == at::kLong;
+}
+
+bool is_regular_scale_type(at::ScalarType dtype) {
+    return dtype == at::kFloat || dtype == at::kHalf || dtype == at::kBFloat16;
+}
+
+void check_integer_tensor(char const* name, torch::Tensor const& tensor) {
+    TORCH_CHECK(tensor.defined(), name, " must be defined");
+    TORCH_CHECK(is_integer_tensor_type(tensor.scalar_type()),
+                name,
+                " must be an integer tensor");
+}
+
+void check_regular_scale(char const* name, torch::Tensor const& scale) {
+    TORCH_CHECK(scale.defined(), name, " must be provided explicitly");
+    TORCH_CHECK(scale.numel() > 0,
+                name,
+                " must contain at least one explicit scale value");
+    TORCH_CHECK(is_regular_scale_type(scale.scalar_type()),
+                name,
+                " must be a regular fp32, fp16, or bf16 scale tensor");
+}
+
+void check_int_matmul_inputs(char const* op_name,
+                             torch::Tensor const& A,
+                             torch::Tensor const& B,
+                             torch::Tensor const& A_scale,
+                             torch::Tensor const& B_scale) {
+    torch::checkAllContiguous(op_name, {{A, "A", 0},
+                                        {B, "B", 1},
+                                        {A_scale, "A_scale", 2},
+                                        {B_scale, "B_scale", 3}});
+    torch::checkDeviceType(op_name, {A, B, A_scale, B_scale}, at::DeviceType::CUDA);
+    torch::checkAllSameGPU(op_name, {{A, "A", 0},
+                                     {B, "B", 1},
+                                     {A_scale, "A_scale", 2},
+                                     {B_scale, "B_scale", 3}});
+    check_integer_tensor("A", A);
+    check_integer_tensor("B", B);
+    check_regular_scale("A_scale", A_scale);
+    check_regular_scale("B_scale", B_scale);
+    TORCH_CHECK(A.dim() == 2 && B.dim() == 2, "A and B must be 2D");
+    TORCH_CHECK(A.size(1) == B.size(1), "Inner dimensions must match for A @ B.T");
+}
+
+}  // namespace
+
+torch::Tensor pack_int4(torch::Tensor const& input)
+{
+    torch::checkAllContiguous("pack_int4", {{input, "input", 0}});
+    torch::checkDeviceType("pack_int4", {input}, at::DeviceType::CUDA);
+    check_integer_tensor("input", input);
+
+#if QUTLASS_HAS_INT_KERNELS
+    return pack_int4_host(input);
+#else
+    TORCH_CHECK(false, "pack_int4 requires include/int_kernels.h at build time");
+    return torch::empty({0}, input.options());
+#endif
+}
+
+torch::Tensor quantize_int8(torch::Tensor const& input,
+                            torch::Tensor const& scale)
+{
+    torch::checkDeviceType("quantize_int8", {input, scale}, at::DeviceType::CUDA);
+    torch::checkAllSameGPU("quantize_int8", {{input, "input", 0},
+                                             {scale, "scale", 1}});
+    check_regular_scale("scale", scale);
+
+    return quantize_int8_host(input, scale);
+}
+
+torch::Tensor matmul_int4_bf16_tn(torch::Tensor const& A,
+                                  torch::Tensor const& B,
+                                  torch::Tensor const& A_scale,
+                                  torch::Tensor const& B_scale)
+{
+    check_int_matmul_inputs("matmul_int4_bf16_tn", A, B, A_scale, B_scale);
+
+    uint32_t M = A.size(0);
+    uint32_t N = B.size(0);
+    auto OUT   = torch::empty({M, N}, torch::dtype(torch::kBFloat16).device(A.device()));
+
+#if QUTLASS_HAS_INT_KERNELS
+    matmul_host_int4_bf16_tn(OUT, A, B, A_scale, B_scale);
+#else
+    TORCH_CHECK(false, "matmul_int4_bf16_tn requires include/int_kernels.h at build time");
+#endif
+
+    return OUT;
+}
+
+torch::Tensor matmul_int8_bf16_tn(torch::Tensor const& A,
+                                  torch::Tensor const& B,
+                                  torch::Tensor const& A_scale,
+                                  torch::Tensor const& B_scale)
+{
+    check_int_matmul_inputs("matmul_int8_bf16_tn", A, B, A_scale, B_scale);
+
+    uint32_t M = A.size(0);
+    uint32_t N = B.size(0);
+    auto OUT   = torch::empty({M, N}, torch::dtype(torch::kBFloat16).device(A.device()));
+
+#if QUTLASS_HAS_INT_KERNELS
+    matmul_host_int8_bf16_tn(OUT, A, B, A_scale, B_scale);
+#else
+    TORCH_CHECK(false, "matmul_int8_bf16_tn requires include/int_kernels.h at build time");
+#endif
+
+    return OUT;
+}
 
 torch::Tensor matmul_mxf4_bf16_tn(torch::Tensor const& A,
                                   torch::Tensor const& B,
@@ -486,6 +614,9 @@ TORCH_LIBRARY(_qutlass_C, m) {
   m.def("matmul_mxf4_bf16_tn(Tensor A, Tensor B, Tensor A_sf, Tensor B_sf, Tensor alpha) -> Tensor");
   m.def("matmul_nvf4_bf16_tn(Tensor A, Tensor B, Tensor A_sf, Tensor B_sf, Tensor alpha) -> Tensor");
   m.def("matmul_ada_mxf4_bf16_tn(Tensor A, Tensor B, Tensor A_sf, Tensor B_sf, Tensor alpha) -> Tensor");
+  m.def("pack_int4(Tensor input) -> Tensor");
+  m.def("matmul_int4_bf16_tn(Tensor A, Tensor B, Tensor A_scale, Tensor B_scale) -> Tensor");
+  m.def("matmul_int8_bf16_tn(Tensor A, Tensor B, Tensor A_scale, Tensor B_scale) -> Tensor");
 
   m.def("fusedQuantizeMxQuest(Tensor A, Tensor R, Tensor OUT, Tensor OUT_sf) -> (Tensor, Tensor)");
   m.def("fusedQuantizeMxQuestWithMask(Tensor A, Tensor R, Tensor OUT, Tensor OUT_sf, Tensor OUT_mask) -> (Tensor, Tensor, Tensor)");
@@ -502,13 +633,16 @@ TORCH_LIBRARY_IMPL(_qutlass_C, CUDA, m) {
   m.impl("matmul_mxf4_bf16_tn",      TORCH_FN(QUTLASS::matmul_mxf4_bf16_tn));
   m.impl("matmul_nvf4_bf16_tn",      TORCH_FN(QUTLASS::matmul_nvf4_bf16_tn));
   m.impl("matmul_ada_mxf4_bf16_tn",  TORCH_FN(QUTLASS::matmul_ada_mxf4_bf16_tn));
+  m.impl("pack_int4",                TORCH_FN(QUTLASS::pack_int4));
+  m.impl("matmul_int4_bf16_tn",      TORCH_FN(QUTLASS::matmul_int4_bf16_tn));
+  m.impl("matmul_int8_bf16_tn",      TORCH_FN(QUTLASS::matmul_int8_bf16_tn));
 
   m.impl("fusedQuantizeMxQuest",     TORCH_FN(QUTLASS::fusedQuantizeMxQuest));
   m.impl("fusedQuantizeMxQuestWithMask", TORCH_FN(QUTLASS::fusedQuantizeMxQuestWithMask));
   m.impl("fusedQuantizeMxAbsMax",    TORCH_FN(QUTLASS::fusedQuantizeMxAbsMax));
   m.impl("fusedQuantizeNvQuest",     TORCH_FN(QUTLASS::fusedQuantizeNvQuest));
   m.impl("fusedQuantizeNvAbsMax",    TORCH_FN(QUTLASS::fusedQuantizeNvAbsMax));
-  m.impl("quantize_int8",            TORCH_FN(QUTLASS::quantize_int8_host));
+  m.impl("quantize_int8",            TORCH_FN(QUTLASS::quantize_int8));
 
   //m.impl("backward_t_bf16",          TORCH_FN(QUTLASS::backward_t_bf16));
   //m.impl("backward_qt_bf16",         TORCH_FN(QUTLASS::backward_qt_bf16));
@@ -527,13 +661,16 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m
     m.def("matmul_nvf4_bf16_tn",     &matmul_nvf4_bf16_tn,     "matmul_nvf4_bf16_tn");
     m.def("matmul_mxf8_bf16_tn",     &matmul_mxf8_bf16_tn,     "matmul_mxf8_bf16_tn");
     m.def("matmul_mxf8_bf16_nn",     &matmul_mxf8_bf16_nn,     "matmul_mxf8_bf16_nn");
+    m.def("pack_int4",               &pack_int4,               "pack_int4");
+    m.def("matmul_int4_bf16_tn",     &matmul_int4_bf16_tn,     "matmul_int4_bf16_tn");
+    m.def("matmul_int8_bf16_tn",     &matmul_int8_bf16_tn,     "matmul_int8_bf16_tn");
 
     m.def("fusedQuantizeMxQuest",  &QUTLASS::fusedQuantizeMxQuest,  "fusedQuantizeMxQuest");
     m.def("fusedQuantizeMxQuestWithMask",  &QUTLASS::fusedQuantizeMxQuestWithMask,  "fusedQuantizeMxQuestWithMask");
     m.def("fusedQuantizeMxAbsMax", &QUTLASS::fusedQuantizeMxAbsMax, "fusedQuantizeMxAbsMax");
     m.def("fusedQuantizeNvQuest",  &QUTLASS::fusedQuantizeNvQuest,  "fusedQuantizeNvQuest");
     m.def("fusedQuantizeNvAbsMax", &QUTLASS::fusedQuantizeNvAbsMax, "fusedQuantizeNvAbsMax");
-    m.def("quantize_int8", &QUTLASS::quantize_int8_host, "quantize_int8");
+    m.def("quantize_int8", &QUTLASS::quantize_int8, "quantize_int8");
 
     m.def("backward_t_bf16",  &backward_t_bf16,  "backward_t_bf16");
     m.def("backward_qt_bf16", &backward_qt_bf16, "backward_qt_bf16");
