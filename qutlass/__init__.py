@@ -40,11 +40,8 @@ def matmul_int4_bf16_tn(
     b_packed: torch.Tensor,
     a_scale: torch.Tensor,
     b_scale: torch.Tensor,
-    alpha: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    return qutlass._CUDA.matmul_int4_bf16_tn(
-        a_packed, b_packed, a_scale, b_scale, alpha
-    )
+    return qutlass._CUDA.matmul_int4_bf16_tn(a_packed, b_packed, a_scale, b_scale)
 
 
 def matmul_int8_bf16_tn(
@@ -52,12 +49,11 @@ def matmul_int8_bf16_tn(
     b_int8: torch.Tensor,
     a_scale: torch.Tensor,
     b_scale: torch.Tensor,
-    alpha: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    return qutlass._CUDA.matmul_int8_bf16_tn(a_int8, b_int8, a_scale, b_scale, alpha)
+    return qutlass._CUDA.matmul_int8_bf16_tn(a_int8, b_int8, a_scale, b_scale)
 
 
-# Legacy MXFP/NVFP wrappers are retained temporarily for existing callers.
+# Legacy MXFP/NVFP source material retained temporarily for existing callers.
 def matmul_mxf4_bf16_tn(
     a: torch.Tensor,
     b: torch.Tensor,
@@ -158,7 +154,7 @@ def matmul_nvf4_bf16_tn(
         raise ValueError(f"invalid backend {backend!r}; use 'cutlass' or 'flashinfer'")
 
 
-# Legacy MXFP8 wrappers are retained temporarily for existing callers.
+# Legacy MXFP8 source material retained temporarily for existing callers.
 def matmul_mxf8_bf16_tn(a: torch.Tensor,
                         b: torch.Tensor,
                         block_scale_a: torch.Tensor,
