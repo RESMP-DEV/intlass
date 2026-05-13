@@ -31,6 +31,7 @@
 #include "include/gemm.h"
 #include "include/fused_quantize_host.h"
 #include "include/backward_host.h"
+#include "include/int8_quantize.h"
 
 namespace QUTLASS {
 
@@ -491,6 +492,7 @@ TORCH_LIBRARY(_qutlass_C, m) {
   m.def("fusedQuantizeMxAbsMax(Tensor A, Tensor R, Tensor OUT, Tensor OUT_sf) -> (Tensor, Tensor)");
   m.def("fusedQuantizeNvQuest(Tensor A, Tensor R, Tensor OUT, Tensor OUT_sf, Tensor global_scale) -> (Tensor, Tensor)");
   m.def("fusedQuantizeNvAbsMax(Tensor A, Tensor R, Tensor OUT, Tensor OUT_sf, Tensor global_scale) -> (Tensor, Tensor)");
+  m.def("quantize_int8(Tensor input, Tensor scale) -> Tensor");
 
   //m.def("backward_t_bf16(Tensor x_e2m1, Tensor x_e8m0, Tensor h, float alpha, Tensor xh_e2m1, Tensor xh_e8m0) -> void");
   //m.def("backward_qt_bf16(Tensor x, Tensor h, Tensor xh_e2m1, Tensor xh_e8m0) -> void");
@@ -506,6 +508,7 @@ TORCH_LIBRARY_IMPL(_qutlass_C, CUDA, m) {
   m.impl("fusedQuantizeMxAbsMax",    TORCH_FN(QUTLASS::fusedQuantizeMxAbsMax));
   m.impl("fusedQuantizeNvQuest",     TORCH_FN(QUTLASS::fusedQuantizeNvQuest));
   m.impl("fusedQuantizeNvAbsMax",    TORCH_FN(QUTLASS::fusedQuantizeNvAbsMax));
+  m.impl("quantize_int8",            TORCH_FN(QUTLASS::quantize_int8_host));
 
   //m.impl("backward_t_bf16",          TORCH_FN(QUTLASS::backward_t_bf16));
   //m.impl("backward_qt_bf16",         TORCH_FN(QUTLASS::backward_qt_bf16));
@@ -530,6 +533,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m
     m.def("fusedQuantizeMxAbsMax", &QUTLASS::fusedQuantizeMxAbsMax, "fusedQuantizeMxAbsMax");
     m.def("fusedQuantizeNvQuest",  &QUTLASS::fusedQuantizeNvQuest,  "fusedQuantizeNvQuest");
     m.def("fusedQuantizeNvAbsMax", &QUTLASS::fusedQuantizeNvAbsMax, "fusedQuantizeNvAbsMax");
+    m.def("quantize_int8", &QUTLASS::quantize_int8_host, "quantize_int8");
 
     m.def("backward_t_bf16",  &backward_t_bf16,  "backward_t_bf16");
     m.def("backward_qt_bf16", &backward_qt_bf16, "backward_qt_bf16");

@@ -144,6 +144,10 @@ def matmul_mxf8_bf16_nn(a: torch.Tensor,
     return qutlass._CUDA.matmul_mxf8_bf16_nn(a, b, block_scale_a, block_scale_b, alpha)
 
 
+def quantize_int8(a: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+    return qutlass._CUDA.quantize_int8(a, scale)
+
+
 def fusedQuantizeMx(
     a: torch.Tensor,
     b: torch.Tensor,
