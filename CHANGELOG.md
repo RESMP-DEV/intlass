@@ -4,6 +4,9 @@
 
 ### Added
 
+- Added a stdlib-only `tools/check_intlass_static_contract.py` checker for the
+  Ampere INT4/INT8 static migration contract, including default report,
+  `--list-checks`, and strict failure mode.
 - Added deterministic signed INT4 pack/unpack tests, including an SM86-gated
   CUDA extension comparison for `qutlass._CUDA.pack_int4`.
 - Added deterministic SM86-gated `matmul_int4_bf16_tn` correctness tests
