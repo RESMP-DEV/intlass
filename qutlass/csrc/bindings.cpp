@@ -32,16 +32,7 @@
 #include "include/fused_quantize_host.h"
 #include "include/backward_host.h"
 #include "include/int8_quantize.h"
-#if defined(__has_include)
-#if __has_include("include/int_kernels.h")
 #include "include/int_kernels.h"
-#define QUTLASS_HAS_INT_KERNELS 1
-#endif
-#endif
-
-#ifndef QUTLASS_HAS_INT_KERNELS
-#define QUTLASS_HAS_INT_KERNELS 0
-#endif
 
 namespace QUTLASS {
 
@@ -104,12 +95,7 @@ torch::Tensor pack_int4(torch::Tensor const& input)
     torch::checkDeviceType("pack_int4", {input}, at::DeviceType::CUDA);
     check_integer_tensor("input", input);
 
-#if QUTLASS_HAS_INT_KERNELS
     return pack_int4_host(input);
-#else
-    TORCH_CHECK(false, "pack_int4 requires include/int_kernels.h at build time");
-    return torch::empty({0}, input.options());
-#endif
 }
 
 torch::Tensor quantize_int8(torch::Tensor const& input,
@@ -134,11 +120,7 @@ torch::Tensor matmul_int4_bf16_tn(torch::Tensor const& A,
     uint32_t N = B.size(0);
     auto OUT   = torch::empty({M, N}, torch::dtype(torch::kBFloat16).device(A.device()));
 
-#if QUTLASS_HAS_INT_KERNELS
     matmul_host_int4_bf16_tn(OUT, A, B, A_scale, B_scale);
-#else
-    TORCH_CHECK(false, "matmul_int4_bf16_tn requires include/int_kernels.h at build time");
-#endif
 
     return OUT;
 }
@@ -154,11 +136,7 @@ torch::Tensor matmul_int8_bf16_tn(torch::Tensor const& A,
     uint32_t N = B.size(0);
     auto OUT   = torch::empty({M, N}, torch::dtype(torch::kBFloat16).device(A.device()));
 
-#if QUTLASS_HAS_INT_KERNELS
     matmul_host_int8_bf16_tn(OUT, A, B, A_scale, B_scale);
-#else
-    TORCH_CHECK(false, "matmul_int8_bf16_tn requires include/int_kernels.h at build time");
-#endif
 
     return OUT;
 }
@@ -653,8 +631,7 @@ TORCH_LIBRARY_IMPL(_qutlass_C, CUDA, m) {
 #define DEFINE_pybind(name) m.def(#name, &name, #name);
 
 #ifndef QUTLASS_DISABLE_PYBIND
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m
-)
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     m.def("matmul_mxf4_bf16_tn",     &matmul_mxf4_bf16_tn,     "matmul_mxf4_bf16_tn");
     m.def("matmul_ada_mxf4_bf16_tn", &matmul_ada_mxf4_bf16_tn, "matmul_ada_mxf4_bf16_tn");
@@ -662,8 +639,34 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m
     m.def("matmul_mxf8_bf16_tn",     &matmul_mxf8_bf16_tn,     "matmul_mxf8_bf16_tn");
     m.def("matmul_mxf8_bf16_nn",     &matmul_mxf8_bf16_nn,     "matmul_mxf8_bf16_nn");
     m.def("pack_int4",               &pack_int4,               "pack_int4");
-    m.def("matmul_int4_bf16_tn",     &matmul_int4_bf16_tn,     "matmul_int4_bf16_tn");
-    m.def("matmul_int8_bf16_tn",     &matmul_int8_bf16_tn,     "matmul_int8_bf16_tn");
+    m.def("matmul_int4_bf16_tn",
+          [](torch::Tensor const& A,
+             torch::Tensor const& B,
+             torch::Tensor const& A_scale,
+             torch::Tensor const& B_scale,
+             pybind11::object) {
+              return matmul_int4_bf16_tn(A, B, A_scale, B_scale);
+          },
+          pybind11::arg("A"),
+          pybind11::arg("B"),
+          pybind11::arg("A_scale"),
+          pybind11::arg("B_scale"),
+          pybind11::arg("alpha") = pybind11::none(),
+          "matmul_int4_bf16_tn");
+    m.def("matmul_int8_bf16_tn",
+          [](torch::Tensor const& A,
+             torch::Tensor const& B,
+             torch::Tensor const& A_scale,
+             torch::Tensor const& B_scale,
+             pybind11::object) {
+              return matmul_int8_bf16_tn(A, B, A_scale, B_scale);
+          },
+          pybind11::arg("A"),
+          pybind11::arg("B"),
+          pybind11::arg("A_scale"),
+          pybind11::arg("B_scale"),
+          pybind11::arg("alpha") = pybind11::none(),
+          "matmul_int8_bf16_tn");
 
     m.def("fusedQuantizeMxQuest",  &QUTLASS::fusedQuantizeMxQuest,  "fusedQuantizeMxQuest");
     m.def("fusedQuantizeMxQuestWithMask",  &QUTLASS::fusedQuantizeMxQuestWithMask,  "fusedQuantizeMxQuestWithMask");
