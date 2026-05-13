@@ -19,8 +19,6 @@ import qutlass._CUDA
 from qutlass.utils import get_padded_shape_mx, get_padded_shape_nv, pad_to_block
 from typing import Literal
 
-import warnings
-
 try:
     from flashinfer import mm_fp4
 
@@ -29,6 +27,37 @@ except Exception:
     _HAS_FLASHINFER = False
 
 
+def pack_int4(x_int8: torch.Tensor) -> torch.Tensor:
+    return qutlass._CUDA.pack_int4(x_int8)
+
+
+def quantize_int8(x: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+    return qutlass._CUDA.quantize_int8(x, scale)
+
+
+def matmul_int4_bf16_tn(
+    a_packed: torch.Tensor,
+    b_packed: torch.Tensor,
+    a_scale: torch.Tensor,
+    b_scale: torch.Tensor,
+    alpha: torch.Tensor | None = None,
+) -> torch.Tensor:
+    return qutlass._CUDA.matmul_int4_bf16_tn(
+        a_packed, b_packed, a_scale, b_scale, alpha
+    )
+
+
+def matmul_int8_bf16_tn(
+    a_int8: torch.Tensor,
+    b_int8: torch.Tensor,
+    a_scale: torch.Tensor,
+    b_scale: torch.Tensor,
+    alpha: torch.Tensor | None = None,
+) -> torch.Tensor:
+    return qutlass._CUDA.matmul_int8_bf16_tn(a_int8, b_int8, a_scale, b_scale, alpha)
+
+
+# Legacy MXFP/NVFP wrappers are retained temporarily for existing callers.
 def matmul_mxf4_bf16_tn(
     a: torch.Tensor,
     b: torch.Tensor,
@@ -129,6 +158,7 @@ def matmul_nvf4_bf16_tn(
         raise ValueError(f"invalid backend {backend!r}; use 'cutlass' or 'flashinfer'")
 
 
+# Legacy MXFP8 wrappers are retained temporarily for existing callers.
 def matmul_mxf8_bf16_tn(a: torch.Tensor,
                         b: torch.Tensor,
                         block_scale_a: torch.Tensor,
@@ -142,10 +172,6 @@ def matmul_mxf8_bf16_nn(a: torch.Tensor,
                         block_scale_b: torch.Tensor,
                         alpha: torch.Tensor) -> torch.Tensor:
     return qutlass._CUDA.matmul_mxf8_bf16_nn(a, b, block_scale_a, block_scale_b, alpha)
-
-
-def quantize_int8(a: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
-    return qutlass._CUDA.quantize_int8(a, scale)
 
 
 def fusedQuantizeMx(
