@@ -1,189 +1,183 @@
-# QuTLASS v0.2.0
+# IntLASS: Ampere SM86 INT4/INT8 CUDA Extension
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-yellow.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![CUDA 12.8](https://img.shields.io/badge/CUDA-12.8-green.svg)](https://developer.nvidia.com/cuda-toolkit)
-[![Static Badge](https://img.shields.io/badge/CUTLASS-4.2.1-purple)](https://github.com/NVIDIA/cutlass)
 [![Static Badge](https://img.shields.io/badge/PyTorch-2.8-red)](https://download.pytorch.org/whl/nightly/cu128)
 
-**CUTLASS-powered quantized BLAS library for low-bit deep learning on NVIDIA Blackwell GPUs.**
+**Active project:** Ampere `sm_86` INT4/INT8 packing, quantization, and BF16-output GEMM for NVIDIA Ampere Tensor Cores.
 
-QuTLASS is a high-performance library designed for **low-precision kernel support** in deep learning quantization, built on top of [NVIDIA CUTLASS](https://github.com/NVIDIA/cutlass).
-It introduces **narrow-precision microscaling routines** tailored for **quantized Large Language Model (LLM)** inference and training on **NVIDIA Blackwell GPUs**.
+This checkout is being migrated from the original Blackwell QuTLASS MXFP/NVFP codebase into an Ampere-focused CUDA extension. New work should target explicit integer quantization contracts: packed INT4 data, INT8 data, scale and zero-point handling, and integer accumulation paths feeding BF16 results.
 
-[![arXiv](https://img.shields.io/badge/arXiv-2509.23202-b31b1b.svg)](https://arxiv.org/pdf/2509.23202)
-[![arXiv](https://img.shields.io/badge/arXiv-2505.14669-b31b1b.svg)](https://arxiv.org/abs/2505.14669)
+Primary active API surface:
+
+- `pack_int4`
+- `quantize_int8`
+- `matmul_int4_bf16_tn`
+- `matmul_int8_bf16_tn`
+
+The intended active architecture target is `sm_86` first, with `sm_80` compatibility where practical. MXFP, NVFP, FP4, FP8, and Blackwell-specific CUTLASS paths are retained only as legacy/source material unless a task explicitly asks for them.
 
 ---
 
 ## Table of Contents
-- [Microscaling in Blackwell](#microscaling-in-blackwell)
-- [What’s New in v0.2](#-what-is-new-in-qutlass-v02)
-- [Features from Previous Versions](#-features-from-previous-versions)
-- [Getting Started](#️-getting-started)
-- [Usage Examples](#-usage-example)
-- [Benchmarks](#-benchmarks)
-- [Citation](#-citation)
+- [Active Ampere Scope](#active-ampere-scope)
+- [Getting Started](#getting-started)
+- [Usage](#usage)
+- [Validation](#validation)
+- [Legacy/Source Material: MXFP, NVFP, and Blackwell](#legacysource-material-mxfp-nvfp-and-blackwell)
+- [Citation](#citation)
 
 ---
 
-## Microscaling in Blackwell
-The new **Blackwell** architecture supports native matrix multiplication with microscaling, using scale factors in the form:
+## Active Ampere Scope
 
-$$
-D = C + (A \times \mathrm{SFA}) \cdot (B \times \mathrm{SFB})
-$$
+The active implementation direction is an INT4/INT8 CUDA extension for Ampere:
 
-Here, the scale factors are applied along the inner ($K$) dimension of the GEMM.
-For MXFP types, one scale factor is shared by every 32 elements along $K$ (group size $gs=32$).
-Thus, for an $M \times K$ matrix $A$, the corresponding scale matrix $\mathrm{SFA}$ has dimensions:
+- INT4 packing via `pack_int4`
+- INT8 quantization via `quantize_int8`
+- BF16-output Tensor Core GEMM via `matmul_int4_bf16_tn`
+- BF16-output Tensor Core GEMM via `matmul_int8_bf16_tn`
+- Explicit scale, zero-point, layout, and accumulation behavior for Ampere kernels
 
-$$
-M \times \left\lceil K / gs \right\rceil
-$$
+Ampere kernel work should avoid Blackwell-only assumptions such as `sm_100`, `sm_120`, MXFP block-scale layouts as the public contract, or FP8 scale dtypes as the active interface.
 
-## 🚀 What is new in QuTLASS v0.2:
-- **FlashInfer backend** support for **B200 GPUs**
-- **Quantization-Aware Training (QAT)** via MXFP types:
-  - Quartet clipping mask computation integrated in quantization routines
-  - Prototype backward kernels for MXFP4 (`sm_120`) and MXFP8 (`sm_100`)
-  - Integrated CUTLASS MXFP8 backward GEMM kernels (TN and NN layouts)
-- **Updated Transformers Integration** for QAT ([#41897](https://github.com/huggingface/transformers/pull/41897))
-- **Nanochat-QAT Integration** ([#1](https://github.com/IST-DASLab/nanochat-qat/pull/1))
+## Getting Started
 
-## 🧩 Features from Previous Versions
-### From QuTLASS v0.1:
-- Support for ```sm_100``` GPUs (e.g., NVIDIA B200).
-- NVFP4 Microscaling:
-    - Full W4A4 quantization support.
-    - Online rotations:
-        - Fused transform + quantization + scale computation.
-        - Rotation matrices loaded at runtime, allowing any transformation to be applied.
-    - NVFP4 Matmul Kernels:
-        - CUTLASS-backed NVFP4:NVFP4 with block-scale reordering.
-    - Quantization:
-        - Abs-Max supported.
-- Multiple rotation sizes (16/32/64/128) supported for both MXFP4 and NVFP4.
-- vLLM Integration ([PR #24440](https://github.com/vllm-project/vllm/pull/24440))
+### Requirements
 
-### From QuTLASS v0.0:
-- MXFP4 microscaling support, with
-- Weight and Activation quantization (W4A4)
-- *Online rotations*: fused kernel for online transforms, quantization, and scale computation.
-    - Transformations matching the microscaling group sizes (i.e., 32 for MXFP4).
-    - Compatible with any rotation matrix defined (e.g., Identity, Hadamard, DCT), as they are loaded in runtime.
-- Multiple quantization schemes:
-    - [Quartet](https://arxiv.org/pdf/2505.14669) (i.e., [Quest-like](https://arxiv.org/abs/2502.05003)).
-    - Abs-Max.
-- Matmul kernels:
-    - CUTLASS-backed MXFP4:MXFP4 kernel with block-scale reordering.
-    - Prototype kernel for small batch sizes (no reordering required).
-- Transformers Integration ([PR #38696](https://github.com/huggingface/transformers/pull/38696))
+- NVIDIA Ampere GPU, with `sm_86` as the primary target
+- CUDA 12.x toolchain compatible with the local PyTorch build
+- PyTorch extension build environment
 
-> **Note:** QuTLASS is under *active development* and not yet fully optimized.
+### Installation
 
-## ⚙️ Getting Started
-
-### Requirements:
-
-- **NVIDIA Blackwell GPU** (Compute capabilities supported: `sm_120a` and `sm_100a`)
-- **Compatible drivers**: CUDA 12.8 or newer
-
-### Installation:
-
-1. Install requirements:
+Install Python requirements:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Install QuTLASS (in editable mode):
+Install the extension in editable mode for Ampere:
 
 ```bash
-pip install --no-build-isolation -e .
+TORCH_CUDA_ARCH_LIST="8.0;8.6" pip install --no-build-isolation -e .
 ```
 
-in the root folder of this repository.
+## Usage
 
-> **Note:** To generate accurate quantized models using MXFP4 or NVFP4 formats, refer to the [FP-Quant repository](https://github.com/IST-DASLab/FP-Quant).
+The active public names are expected to be:
 
-## 🧪 Usage example
+```python
+import qutlass
 
-Correctness tests can be executed via ```python tests/mxfp4_test.py``` and benchmarks via ```python benchmarks/bench_mxfp4.py```.
+packed_w = qutlass.pack_int4(w_int)
+acts_i8, act_scale, act_zero = qutlass.quantize_int8(acts)
 
-The fused quantization kernel can be invoked directly through ```qutlass.fusedQuantizeMx(a, h, method)```. Here, ```a``` is the input tensor to quantize, ```h``` is the Hadamard matrix, and ```method``` is the quantization scheme specified as ```Literal["quest", "abs_max"]```.
-The kernel interface is defined in ```qutlass/csrc/fused_quantize_mx.cu```.
-The outputs include ```aq```, the quantized data in FP4 (```e2m1```), and ```a_sf``` the corresponding scaling factors in FP8 (```e8m0```).
+out_i4 = qutlass.matmul_int4_bf16_tn(acts_bf16, packed_w, scales, zeros)
+out_i8 = qutlass.matmul_int8_bf16_tn(a_int8, b_int8, a_scale, b_scale)
+```
 
-The matmul kernel can be called via ```qutlass.matmul_mxf4_bf16_tn(aq, bq, a_sf, b_sf, alpha)```. Its implementation can be found in ```qutlass/csrc/gemm.cu```.
-To use this matmul kernel, the scaling factors must be first rearranged into a block-scaled swizzle [format](https://docs.nvidia.com/cuda/cublas/index.html#d-block-scaling-factors-layout).
-The ```qutlass.to_blocked```, located in ```qutlass/utils.py```, handles this reordering.
+Exact argument order and tensor layout requirements should be kept in sync with the bindings and tests as the migration lands.
 
-In addition to the previous CUTLASS-powered MXFP4 matmul kernel, we provide a custom prototype kernel that can be called via ```qutlass.matmul_ada_mxf4_bf16_tn(...)```.
-This implementation is located in ```qutlass/csrc/gemm_ada.cu``` and does **not** require the previous invocation to ```to_blocked```.
-Optimization efforts for this kernel have primarily targeted small batch sizes(i.e., $bs=1\sim 32$). For larger sizes, ```qutlass.matmul_mxf4_bf16_tn``` is recommended.
+## Validation
 
-This applies also to NVFP4, which is functionally equivalent aside from minor naming changes.
+Use focused INT tests and Ampere build flags while this migration is in progress:
 
-## 📈 Benchmarks
+```bash
+TORCH_CUDA_ARCH_LIST="8.0;8.6" pip install --no-build-isolation -e .
+python -m pytest tests -q
+```
 
-### Microbenchmarks
-The following illustrate the performance of QuTLASS MXFP4 across various batch sizes.
-Ideal performance refers to pure matrix multiplication in FP4, without any overhead from quantization.
-Actual performance includes the full pipeline: Hadamard rotation, data quantization, scale computation, and block-scale reordering.
+CUDA-dependent tests should skip clearly when CUDA is unavailable. CPU-only import checks do not validate extension behavior.
 
-<div class="row"><center>
-  <div class="column">
-    <img src="assets/flops_mxfp4_sm120_cutlass.svg" alt="Llama-65B MXFP4:MXFP4" style="width:45%">
-    <img src="assets/flops_nvfp4_sm120_cutlass.svg" alt="Llama-65B MXFP4:MXFP4" style="width:45%">
-  </div>
-  <em>QuTLASS performance on a single Qwen3-32B layer with NVIDIA RTX5090 GPU - CUTLASS backend</em>
- </center>
-</div>
-</br>
-<div class="row"><center>
-  <div class="column">
-    <img src="assets/flops_mxfp4_sm100_flashinfer.svg" alt="Llama-70B MXFP4:MXFP4" style="width:45%">
-    <img src="assets/flops_nvfp4_sm100_flashinfer.svg" alt="Llama-70B MXFP4:MXFP4" style="width:45%">
-  </div>
-  <em>QuTLASS performance on a single Llama-3.1-70B layer with NVIDIA B200 GPU - FlashInfer backend</em>
- </center>
-</div>
+## Legacy/Source Material: MXFP, NVFP, and Blackwell
 
-### End-to-end Inference Speedups
-The following results show the inference speedup of QuTLASS MXFP4 over PyTorch BF16 in Transformers, as a function of batch size and sequence length on 8B and 14B-parameter models.
-MXFP4 delivers consistent performance gains across all batch sizes, with speedups increasing progressively and peaking at $\approx 4\times$ compared to BF16.
+The original QuTLASS README content below describes the Blackwell-focused MXFP/NVFP project that this checkout is being migrated away from. Treat this section as historical reference and source material for migration only. It is not the active project contract for new Ampere INT4/INT8 work.
 
-<div class="row"><center>
-  <div class="column">
-    <img src="assets/qwen3-8b-end-to-end-prefill-speedup-mxfp4-vs-bf16-on-rtx5090.svg" alt="Prefill MXFP4:MXFP4" style="width:90%">
-  </div>
- </center>
-</div>
+### Original QuTLASS v0.2 Identity
 
-<div class="row"><center>
-  <div class="column">
-    <img src="assets/qwen3-14b-end-to-end-prefill-speedup-mxfp4-vs-bf16-on-rtx5090.svg" alt="Prefill MXFP4:MXFP4" style="width:90%">
-  </div>
- </center>
-</div>
+QuTLASS was a CUTLASS-powered quantized BLAS library for low-bit deep learning on NVIDIA Blackwell GPUs.
 
-In order to generate recipes for efficient and accurate weight + activation quantization for low-bit MXFP and NVFP formats, please refer to [FP-Quant](https://github.com/IST-DASLab/FP-Quant).
+It introduced narrow-precision microscaling routines tailored for quantized LLM inference and training on NVIDIA Blackwell GPUs.
 
-### End-to-end Training Speedups
-The following results show some QAT performance using QuTLASS.
-Using our Transformers integration, an MXFP4:MXFP8 QAT scheme applied to Llama-3.1-8B recovers over half of the lost performance after only ~100M training tokens, while training 30% faster than BF16 pseudo-quantization QAT.
+[![arXiv](https://img.shields.io/badge/arXiv-2509.23202-b31b1b.svg)](https://arxiv.org/pdf/2509.23202)
+[![arXiv](https://img.shields.io/badge/arXiv-2505.14669-b31b1b.svg)](https://arxiv.org/abs/2505.14669)
 
-<div class="row"><center>
-  <div class="column">
-    <img src="assets/training.png" width="650"/>
-  </div>
- <em>Llama-3.1-8B-Instruct</em>
- </center>
-</div>
+### Microscaling in Blackwell
 
-For efficient and accurate QAT recipes for low-bit MXFP formats, see [nanochat-qat](https://github.com/IST-DASLab/nanochat-qat/pull/1) and [FP-Quant](https://github.com/huggingface/transformers/pull/41897).
+The Blackwell architecture supports native matrix multiplication with microscaling, using scale factors in the form:
 
-## 📚 Citation
+$$
+D = C + (A \times \mathrm{SFA}) \cdot (B \times \mathrm{SFB})
+$$
+
+The scale factors are applied along the inner ($K$) dimension of the GEMM. For MXFP types, one scale factor is shared by every 32 elements along $K$ (`gs=32`). For an $M \times K$ matrix $A$, the corresponding scale matrix $\mathrm{SFA}$ has dimensions:
+
+$$
+M \times \left\lceil K / gs \right\rceil
+$$
+
+### Legacy QuTLASS v0.2 Features
+
+- FlashInfer backend support for B200 GPUs
+- Quantization-aware training via MXFP types
+- Quartet clipping mask computation integrated in quantization routines
+- Prototype backward kernels for MXFP4 (`sm_120`) and MXFP8 (`sm_100`)
+- CUTLASS MXFP8 backward GEMM kernels in TN and NN layouts
+- Transformers QAT integration
+- Nanochat-QAT integration
+
+### Legacy QuTLASS v0.1 Features
+
+- Support for `sm_100` GPUs, including NVIDIA B200
+- NVFP4 microscaling with W4A4 quantization support
+- Online rotations with fused transform, quantization, and scale computation
+- Runtime-loaded rotation matrices
+- CUTLASS-backed NVFP4:NVFP4 matmul with block-scale reordering
+- Abs-max quantization
+- Multiple rotation sizes for MXFP4 and NVFP4
+- vLLM integration
+
+### Legacy QuTLASS v0.0 Features
+
+- MXFP4 microscaling support
+- Weight and activation quantization (`W4A4`)
+- Online transforms, quantization, and scale computation
+- Microscaling group-size-compatible transformations
+- Quartet and abs-max quantization schemes
+- CUTLASS-backed MXFP4:MXFP4 matmul with block-scale reordering
+- Small-batch prototype MXFP4 kernel without reordering
+- Transformers integration
+
+### Legacy Usage Notes
+
+Legacy MXFP4 correctness tests were run with:
+
+```bash
+python tests/mxfp4_test.py
+```
+
+Legacy MXFP4 benchmarks were run with:
+
+```bash
+python benchmarks/bench_mxfp4.py
+```
+
+The legacy fused quantization kernel was exposed as `qutlass.fusedQuantizeMx(a, h, method)`, where `method` was `Literal["quest", "abs_max"]`. It returned FP4 (`e2m1`) quantized data and FP8 (`e8m0`) scaling factors.
+
+The legacy matmul path used `qutlass.matmul_mxf4_bf16_tn(aq, bq, a_sf, b_sf, alpha)` with scale factors rearranged by `qutlass.to_blocked` into the cuBLAS block-scaled swizzle format. A custom prototype path, `qutlass.matmul_ada_mxf4_bf16_tn(...)`, avoided that reordering for small batch sizes. NVFP4 was treated as functionally equivalent aside from naming.
+
+### Legacy Benchmark Material
+
+The original benchmark figures and claims measured MXFP4/NVFP4 behavior on Blackwell and RTX 5090-class targets. Keep these assets as historical references while replacing benchmark labels and commands with INT4/INT8 equivalents.
+
+In the original README, microbenchmarks showed MXFP4 performance across batch sizes, including ideal matrix multiplication and full-pipeline measurements with Hadamard rotation, data quantization, scale computation, and block-scale reordering.
+
+Original end-to-end inference notes described MXFP4 speedups over PyTorch BF16 in Transformers for 8B and 14B models. Original training notes described MXFP4:MXFP8 QAT on Llama-3.1-8B.
+
+For historical recipes related to MXFP and NVFP formats, the original project referenced [FP-Quant](https://github.com/IST-DASLab/FP-Quant), [nanochat-qat](https://github.com/IST-DASLab/nanochat-qat/pull/1), and related Transformers integrations.
+
+## Citation
 
 ```bibtex
 @misc{qutlass2025,
