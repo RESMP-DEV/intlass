@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added an SM86-only INT8 benchmark that reports the BF16 PyTorch baseline and
+  `matmul_int8_bf16_tn` timing.
 - Added an SM86-gated packed signed INT4 x INT4 to BF16 GEMM host path with
   explicit regular scales for `matmul_host_int4_bf16_tn`.
 - Added an SM86-gated INT8 x INT8 to BF16 GEMM host path with explicit regular
